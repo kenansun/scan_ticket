@@ -7,7 +7,6 @@ class Receipt {
   final String currency;
   final DateTime receiptDate;
   final DateTime createdAt;
-  final List<ReceiptItem> items;
 
   Receipt({
     required this.id,
@@ -18,7 +17,6 @@ class Receipt {
     required this.currency,
     required this.receiptDate,
     required this.createdAt,
-    required this.items,
   });
 
   Map<String, dynamic> toMap() {
@@ -44,7 +42,28 @@ class Receipt {
       currency: map['currency'],
       receiptDate: DateTime.parse(map['receipt_date']),
       createdAt: DateTime.parse(map['created_at']),
-      items: [], // 需要单独加载
+    );
+  }
+
+  Receipt copyWith({
+    String? id,
+    String? userId,
+    String? imagePath,
+    String? merchantName,
+    double? totalAmount,
+    String? currency,
+    DateTime? receiptDate,
+    DateTime? createdAt,
+  }) {
+    return Receipt(
+      id: id ?? this.id,
+      userId: userId ?? this.userId,
+      imagePath: imagePath ?? this.imagePath,
+      merchantName: merchantName ?? this.merchantName,
+      totalAmount: totalAmount ?? this.totalAmount,
+      currency: currency ?? this.currency,
+      receiptDate: receiptDate ?? this.receiptDate,
+      createdAt: createdAt ?? this.createdAt,
     );
   }
 }

@@ -1,115 +1,76 @@
+import 'package:sqflite_common/sqlite_api.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:sqflite_common_ffi_web/sqflite_ffi_web.dart';
 import 'package:path/path.dart';
-import 'package:sqflite/sqflite.dart';
 import '../models/receipt.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'dart:io' show Platform;
+import 'package:sqflite/sqflite.dart' as sqflite;
 
 class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._init();
   static Database? _database;
-  static const String _dbName = 'scan_ticket.db';
-  static const int _dbVersion = 1;
+  static late DatabaseFactory _databaseFactory;
 
-  DatabaseHelper._init();
+  DatabaseHelper._init() {
+    if (kIsWeb) {
+      _databaseFactory = databaseFactoryFfiWeb;
+    } else if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+      sqfliteFfiInit();
+      _databaseFactory = databaseFactoryFfi;
+    } else {
+      // Use regular sqflite for Android and iOS
+      _databaseFactory = sqflite.databaseFactory;
+    }
+  }
 
   Future<Database> get database async {
     if (_database != null) return _database!;
-    print('Initializing database...');
-    _database = await _initDB(_dbName);
+    _database = await _initDB('receipts.db');
     return _database!;
   }
 
   Future<Database> _initDB(String filePath) async {
-    final dbPath = await getDatabasesPath();
+    final dbPath = await _databaseFactory.getDatabasesPath();
     final path = join(dbPath, filePath);
-    print('Database path: $path');
-    print('Database exists: ${await databaseExists(path)}');
 
-    return await openDatabase(
+    return await _databaseFactory.openDatabase(
       path,
-      version: _dbVersion,
-      onCreate: _createDB,
-      onConfigure: _onConfigure,
-      onOpen: (db) {
-        print('Database opened successfully');
-      },
+      options: OpenDatabaseOptions(
+        version: 1,
+        onCreate: _createDB,
+        onConfigure: _onConfigure,
+      ),
     );
   }
 
   Future<void> _onConfigure(Database db) async {
-    print('Configuring database...');
-    // 启用外键约束
     await db.execute('PRAGMA foreign_keys = ON');
   }
 
   Future<void> _createDB(Database db, int version) async {
-    print('Creating database tables...');
-    
-    try {
-      // 创建用户表
-      await db.execute('''
-        CREATE TABLE users (
-          id TEXT PRIMARY KEY,
-          phone TEXT UNIQUE NOT NULL,
-          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
-      ''');
-      print('Users table created');
+    const idType = 'TEXT PRIMARY KEY';
+    const textType = 'TEXT NOT NULL';
+    const realType = 'REAL NOT NULL';
 
-      // 创建收据表
-      await db.execute('''
-        CREATE TABLE receipts (
-          id TEXT PRIMARY KEY,
-          user_id TEXT NOT NULL,
-          image_path TEXT NOT NULL,
-          merchant_name TEXT NOT NULL,
-          total_amount DECIMAL(10,2) NOT NULL,
-          currency TEXT NOT NULL,
-          receipt_date DATE NOT NULL,
-          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-          FOREIGN KEY (user_id) REFERENCES users(id)
-        )
-      ''');
-      print('Receipts table created');
-
-      // 创建收据项目表
-      await db.execute('''
-        CREATE TABLE receipt_items (
-          id TEXT PRIMARY KEY,
-          receipt_id TEXT NOT NULL,
-          name TEXT NOT NULL,
-          amount DECIMAL(10,2) NOT NULL,
-          quantity INTEGER,
-          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-          FOREIGN KEY (receipt_id) REFERENCES receipts(id)
-        )
-      ''');
-      print('Receipt items table created');
-
-      // 创建翻译表
-      await db.execute('''
-        CREATE TABLE translations (
-          id TEXT PRIMARY KEY,
-          item_id TEXT NOT NULL,
-          original_text TEXT NOT NULL,
-          translated_text TEXT NOT NULL,
-          language TEXT NOT NULL,
-          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-          FOREIGN KEY (item_id) REFERENCES receipt_items(id)
-        )
-      ''');
-      print('Translations table created');
-      
-    } catch (e) {
-      print('Error creating database tables: $e');
-      rethrow;
-    }
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS receipts (
+        id $idType,
+        user_id $textType,
+        image_path $textType,
+        merchant_name $textType,
+        total_amount $realType,
+        currency $textType,
+        receipt_date $textType,
+        created_at $textType
+      )
+    ''');
   }
 
-  // 测试数据库连接
   Future<bool> testConnection() async {
     try {
-      final db = await database;
-      await db.rawQuery('SELECT 1');
-      print('Database connection test successful');
+      final db = await instance.database;
+      await db.execute('SELECT 1');
       return true;
     } catch (e) {
       print('Database connection test failed: $e');
@@ -117,28 +78,22 @@ class DatabaseHelper {
     }
   }
 
-  // 删除数据库
   Future<void> deleteDatabase() async {
-    final dbPath = await getDatabasesPath();
-    final path = join(dbPath, _dbName);
-    print('Deleting database at: $path');
-    await databaseFactory.deleteDatabase(path);
+    final dbPath = await _databaseFactory.getDatabasesPath();
+    final path = join(dbPath, 'receipts.db');
+    await _databaseFactory.deleteDatabase(path);
     _database = null;
   }
 
+  // CRUD Operations
   Future<String> insertReceipt(Receipt receipt) async {
-    final db = await database;
+    final db = await instance.database;
     await db.insert('receipts', receipt.toMap());
-    
-    for (var item in receipt.items) {
-      await db.insert('receipt_items', item.toMap());
-    }
-    
     return receipt.id;
   }
 
   Future<Receipt?> getReceipt(String id) async {
-    final db = await database;
+    final db = await instance.database;
     final maps = await db.query(
       'receipts',
       where: 'id = ?',
@@ -146,57 +101,38 @@ class DatabaseHelper {
     );
 
     if (maps.isEmpty) return null;
-
-    final receipt = Receipt.fromMap(maps.first);
-    final items = await db.query(
-      'receipt_items',
-      where: 'receipt_id = ?',
-      whereArgs: [id],
-    );
-
-    return Receipt(
-      id: receipt.id,
-      userId: receipt.userId,
-      imagePath: receipt.imagePath,
-      merchantName: receipt.merchantName,
-      totalAmount: receipt.totalAmount,
-      currency: receipt.currency,
-      receiptDate: receipt.receiptDate,
-      createdAt: receipt.createdAt,
-      items: items.map((item) => ReceiptItem.fromMap(item)).toList(),
-    );
+    return Receipt.fromMap(maps.first);
   }
 
   Future<List<Receipt>> getReceipts(String userId) async {
-    final db = await database;
-    final receipts = await db.query(
+    final db = await instance.database;
+    final orderBy = 'receipt_date DESC';
+    final result = await db.query(
       'receipts',
       where: 'user_id = ?',
       whereArgs: [userId],
-      orderBy: 'created_at DESC',
+      orderBy: orderBy,
     );
 
-    return Future.wait(
-      receipts.map((map) async {
-        final receipt = Receipt.fromMap(map);
-        final items = await db.query(
-          'receipt_items',
-          where: 'receipt_id = ?',
-          whereArgs: [receipt.id],
-        );
+    return result.map((map) => Receipt.fromMap(map)).toList();
+  }
 
-        return Receipt(
-          id: receipt.id,
-          userId: receipt.userId,
-          imagePath: receipt.imagePath,
-          merchantName: receipt.merchantName,
-          totalAmount: receipt.totalAmount,
-          currency: receipt.currency,
-          receiptDate: receipt.receiptDate,
-          createdAt: receipt.createdAt,
-          items: items.map((item) => ReceiptItem.fromMap(item)).toList(),
-        );
-      }),
+  Future<int> updateReceipt(Receipt receipt) async {
+    final db = await instance.database;
+    return db.update(
+      'receipts',
+      receipt.toMap(),
+      where: 'id = ?',
+      whereArgs: [receipt.id],
+    );
+  }
+
+  Future<int> deleteReceipt(String id) async {
+    final db = await instance.database;
+    return await db.delete(
+      'receipts',
+      where: 'id = ?',
+      whereArgs: [id],
     );
   }
 }

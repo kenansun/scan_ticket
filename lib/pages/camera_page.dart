@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import '../services/camera_service.dart';
+import 'package:flutter/scheduler.dart';
 
 class CameraPage extends StatefulWidget {
   const CameraPage({super.key});
@@ -13,6 +14,7 @@ class _CameraPageState extends State<CameraPage> with WidgetsBindingObserver {
   final CameraService _cameraService = CameraService();
   bool _isCameraReady = false;
   bool _isCapturing = false;
+  bool _isDisposing = false;
 
   @override
   void initState() {
@@ -22,15 +24,20 @@ class _CameraPageState extends State<CameraPage> with WidgetsBindingObserver {
   }
 
   Future<void> _initializeCamera() async {
+    if (_isDisposing) return;
+
     try {
-      await _cameraService.initialize();
-      if (mounted) {
+      // 设置相机分辨率
+      final ResolutionPreset preset = ResolutionPreset.medium;
+      await _cameraService.initialize(resolutionPreset: preset);
+      
+      if (mounted && !_isDisposing) {
         setState(() {
           _isCameraReady = true;
         });
       }
     } catch (e) {
-      if (mounted) {
+      if (mounted && !_isDisposing) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error: ${e.toString()}')),
         );
@@ -40,24 +47,43 @@ class _CameraPageState extends State<CameraPage> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    _isDisposing = true;
     WidgetsBinding.instance.removeObserver(this);
-    _cameraService.dispose();
+    
+    // 在帧结束时释放相机资源
+    SchedulerBinding.instance.addPostFrameCallback((_) async {
+      try {
+        if (_isCameraReady) {
+          await _cameraService.pausePreview();
+          await Future.delayed(const Duration(milliseconds: 100));
+        }
+        await _cameraService.dispose();
+      } catch (e) {
+        print('Error disposing camera: $e');
+      }
+    });
+
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (!_isCameraReady) return;
+    if (_isDisposing) return;
 
-    if (state == AppLifecycleState.inactive) {
-      _cameraService.dispose();
+    if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused) {
+      // 页面不活跃时释放相机资源
+      _isCameraReady = false;
+      _cameraService.pausePreview().then((_) {
+        _cameraService.dispose();
+      });
     } else if (state == AppLifecycleState.resumed) {
+      // 页面恢复时重新初始化相机
       _initializeCamera();
     }
   }
 
   Future<void> _takePicture() async {
-    if (_isCapturing) return;
+    if (_isCapturing || _isDisposing) return;
 
     setState(() {
       _isCapturing = true;
@@ -65,17 +91,20 @@ class _CameraPageState extends State<CameraPage> with WidgetsBindingObserver {
 
     try {
       final String imagePath = await _cameraService.takePicture();
-      if (mounted) {
+      if (mounted && !_isDisposing) {
+        // 先暂停预览
+        await _cameraService.pausePreview();
+        await Future.delayed(const Duration(milliseconds: 100));
         Navigator.of(context).pop(imagePath);
       }
     } catch (e) {
-      if (mounted) {
+      if (mounted && !_isDisposing) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Failed to capture image: ${e.toString()}')),
         );
       }
     } finally {
-      if (mounted) {
+      if (mounted && !_isDisposing) {
         setState(() {
           _isCapturing = false;
         });

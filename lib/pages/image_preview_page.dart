@@ -63,18 +63,26 @@ class _ImagePreviewPageState extends State<ImagePreviewPage> {
       // 裁剪图片
       final img.Image croppedImage = img.copyCrop(
         originalImage,
-        safeX,
-        safeY,
-        safeW,
-        safeH,
+        x: safeX,
+        y: safeY,
+        width: safeW,
+        height: safeH,
       );
 
       // 保存裁剪后的图片
       final directory = await getApplicationDocumentsDirectory();
       final String newPath = path.join(
         directory.path,
+        'receipts',
         'cropped_${path.basename(_currentImagePath)}',
       );
+
+      // 确保目录存在
+      final dir = Directory(path.dirname(newPath));
+      if (!await dir.exists()) {
+        await dir.create(recursive: true);
+      }
+
       final File newImage = File(newPath);
       await newImage.writeAsBytes(img.encodeJpg(croppedImage));
 
@@ -113,14 +121,22 @@ class _ImagePreviewPageState extends State<ImagePreviewPage> {
       }
 
       // 旋转图片90度
-      final img.Image rotatedImage = img.copyRotate(originalImage, 90);
+      final img.Image rotatedImage = img.copyRotate(originalImage, angle: 90);
       
       // 保存旋转后的图片
       final directory = await getApplicationDocumentsDirectory();
       final String newPath = path.join(
         directory.path,
+        'receipts',
         'rotated_${path.basename(_currentImagePath)}',
       );
+
+      // 确保目录存在
+      final dir = Directory(path.dirname(newPath));
+      if (!await dir.exists()) {
+        await dir.create(recursive: true);
+      }
+
       final File newImage = File(newPath);
       await newImage.writeAsBytes(img.encodeJpg(rotatedImage));
       
