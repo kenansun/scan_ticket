@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import '../services/camera_service.dart';
 import 'package:flutter/scheduler.dart';
+import 'image_preview_page.dart';
 
 class CameraPage extends StatefulWidget {
   const CameraPage({super.key});
@@ -50,19 +51,13 @@ class _CameraPageState extends State<CameraPage> with WidgetsBindingObserver {
     _isDisposing = true;
     WidgetsBinding.instance.removeObserver(this);
     
-    // 在帧结束时释放相机资源
-    SchedulerBinding.instance.addPostFrameCallback((_) async {
-      try {
-        if (_isCameraReady) {
-          await _cameraService.pausePreview();
-          await Future.delayed(const Duration(milliseconds: 100));
-        }
-        await _cameraService.dispose();
-      } catch (e) {
-        print('Error disposing camera: $e');
+    _cameraService.dispose().then((_) {
+      if (mounted) {
+        setState(() {
+          _isDisposing = false;
+        });
       }
     });
-
     super.dispose();
   }
 
@@ -90,12 +85,27 @@ class _CameraPageState extends State<CameraPage> with WidgetsBindingObserver {
     });
 
     try {
-      final String imagePath = await _cameraService.takePicture();
+      final Map<String, String> result = await _cameraService.takePicture();
       if (mounted && !_isDisposing) {
         // 先暂停预览
         await _cameraService.pausePreview();
-        await Future.delayed(const Duration(milliseconds: 100));
-        Navigator.of(context).pop(imagePath);
+        
+        // 打开预览页面
+        if (mounted) {
+          final previewResult = await Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => ImagePreviewPage(
+                localPath: result['localPath']!,
+                ossUrl: result['ossUrl']!,
+              ),
+            ),
+          );
+          
+          if (mounted) {
+            Navigator.pop(context, previewResult);
+          }
+        }
       }
     } catch (e) {
       if (mounted && !_isDisposing) {

@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
-import '../models/receipt.dart';
-import '../services/database_helper.dart';
 import 'package:intl/intl.dart';
-import 'camera_page.dart';
+import '../services/database_service.dart';
+import 'image_upload_test_page.dart';
 
 class ReceiptListPage extends StatefulWidget {
   const ReceiptListPage({super.key});
@@ -12,10 +11,10 @@ class ReceiptListPage extends StatefulWidget {
 }
 
 class _ReceiptListPageState extends State<ReceiptListPage> {
-  final List<Receipt> _receipts = [];
-  bool _isLoading = false;
-  final _dateFormat = DateFormat('yyyy-MM-dd');
-  final _currencyFormat = NumberFormat.currency(locale: 'zh_CN', symbol: '¥');
+  final DatabaseService _db = DatabaseService.instance;
+  final TextEditingController _searchController = TextEditingController();
+  List<Map<String, dynamic>> _receipts = [];
+  bool _isLoading = true;
 
   @override
   void initState() {
@@ -24,163 +23,162 @@ class _ReceiptListPageState extends State<ReceiptListPage> {
   }
 
   Future<void> _loadReceipts() async {
-    if (_isLoading) return;
-
-    setState(() {
-      _isLoading = true;
-    });
-
+    setState(() => _isLoading = true);
     try {
-      // TODO: 替换为实际的用户ID
-      final receipts = await DatabaseHelper.instance.getReceipts('test_user');
+      final receipts = await _db.getAllReceipts();
       setState(() {
-        _receipts.clear();
-        _receipts.addAll(receipts);
-      });
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to load receipts: $e')),
-        );
-      }
-    } finally {
-      setState(() {
+        _receipts = receipts;
         _isLoading = false;
       });
+    } catch (e) {
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('加载失败: $e')),
+      );
     }
+  }
+
+  Future<void> _searchReceipts(String query) async {
+    setState(() => _isLoading = true);
+    try {
+      final receipts = await _db.searchReceipts(query);
+      setState(() {
+        _receipts = receipts;
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('搜索失败: $e')),
+      );
+    }
+  }
+
+  String _formatDate(int timestamp) {
+    final date = DateTime.fromMillisecondsSinceEpoch(timestamp);
+    return DateFormat('yyyy-MM-dd HH:mm').format(date);
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('我的票据'),
+        title: const Text('收据列表'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.filter_list),
-            onPressed: () {
-              // TODO: 实现筛选功能
+            icon: const Icon(Icons.add_photo_alternate),
+            onPressed: () async {
+              await Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const ImageUploadTestPage(),
+                ),
+              );
+              _loadReceipts(); // 返回时刷新列表
             },
-            tooltip: '筛选',
-          ),
-          IconButton(
-            icon: const Icon(Icons.search),
-            onPressed: () {
-              // TODO: 实现搜索功能
-            },
-            tooltip: '搜索',
           ),
         ],
       ),
-      body: RefreshIndicator(
-        onRefresh: _loadReceipts,
-        child: _isLoading
-            ? const Center(child: CircularProgressIndicator())
-            : _receipts.isEmpty
-                ? Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.receipt_long,
-                          size: 64,
-                          color: Theme.of(context).disabledColor,
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          '没有票据',
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          '点击下方按钮添加票据',
-                          style: Theme.of(context).textTheme.bodyMedium,
-                        ),
-                      ],
-                    ),
-                  )
-                : ListView.builder(
-                    itemCount: _receipts.length,
-                    itemBuilder: (context, index) {
-                      final receipt = _receipts[index];
-                      return Card(
-                        margin: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 8,
-                        ),
-                        child: InkWell(
-                          onTap: () {
-                            // TODO: 导航到票据详情页
-                          },
-                          child: Padding(
-                            padding: const EdgeInsets.all(16),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Expanded(
-                                      child: Text(
-                                        receipt.merchantName,
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .titleMedium,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ),
-                                    Text(
-                                      _currencyFormat
-                                          .format(receipt.totalAmount),
-                                      style:
-                                          Theme.of(context).textTheme.titleLarge,
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 8),
-                                Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Text(
-                                      _dateFormat.format(receipt.receiptDate),
-                                      style:
-                                          Theme.of(context).textTheme.bodyMedium,
-                                    ),
-                                    Text(
-                                      receipt.currency,
-                                      style:
-                                          Theme.of(context).textTheme.bodyMedium,
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => const CameraPage(),
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: TextField(
+              controller: _searchController,
+              decoration: InputDecoration(
+                hintText: '搜索收据...',
+                prefixIcon: const Icon(Icons.search),
+                suffixIcon: IconButton(
+                  icon: const Icon(Icons.clear),
+                  onPressed: () {
+                    _searchController.clear();
+                    _loadReceipts();
+                  },
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              onChanged: (value) {
+                if (value.isEmpty) {
+                  _loadReceipts();
+                } else {
+                  _searchReceipts(value);
+                }
+              },
             ),
-          ).then((value) {
-            if (value == true) {
-              // 如果拍照成功，刷新票据列表
-              _loadReceipts();
-            }
-          });
-        },
-        tooltip: '添加票据',
-        child: const Icon(Icons.add_a_photo),
+          ),
+          Expanded(
+            child: _isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : _receipts.isEmpty
+                    ? const Center(child: Text('暂无收据'))
+                    : ListView.builder(
+                        itemCount: _receipts.length,
+                        itemBuilder: (context, index) {
+                          final receipt = _receipts[index];
+                          return Card(
+                            margin: const EdgeInsets.symmetric(
+                              horizontal: 8.0,
+                              vertical: 4.0,
+                            ),
+                            child: ListTile(
+                              leading: ClipRRect(
+                                borderRadius: BorderRadius.circular(4),
+                                child: Image.network(
+                                  receipt['image_url'],
+                                  width: 60,
+                                  height: 60,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (context, error, stackTrace) {
+                                    return Container(
+                                      width: 60,
+                                      height: 60,
+                                      color: Colors.grey[300],
+                                      child: const Icon(Icons.error),
+                                    );
+                                  },
+                                ),
+                              ),
+                              title: Text(
+                                receipt['title'] ?? '未命名收据',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              subtitle: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  if (receipt['description'] != null)
+                                    Text(
+                                      receipt['description'],
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  Text(
+                                    _formatDate(receipt['created_at']),
+                                    style: TextStyle(
+                                      color: Colors.grey[600],
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              onTap: () {
+                                // TODO: 显示详情页面
+                              },
+                            ),
+                          );
+                        },
+                      ),
+          ),
+        ],
       ),
     );
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 }
